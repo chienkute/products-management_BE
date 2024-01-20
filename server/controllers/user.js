@@ -12,7 +12,6 @@ const register = asyncHandler(async (req, res) => {
       sucess: false,
       message: "Missing input",
     });
-
   const user = await User.findOne({ email });
   if (user) throw new Error("User has existed");
   else {
@@ -34,13 +33,17 @@ const login = asyncHandler(async (req, res) => {
   const response = await User.findOne({ email });
   if (response && (await response.isCorrectPassword(password))) {
     // tách paswd , role ra khỏi response
-    const { password, role, ...userData } = response.toObject();
+    const { password, role, refreshToken, ...userData } = response.toObject();
     const accessToken = generateAccessToken(response._id, role);
-    const refreshToken = generateRefreshToken(response._id);
+    const newRefreshToken = generateRefreshToken(response._id);
     // Lưu refesh token vào db
-    await User.findByIdAndUpdate(response._id, { refreshToken }, { new: true });
+    await User.findByIdAndUpdate(
+      response._id,
+      { newRefreshToken },
+      { new: true }
+    );
     // Lưu refresh token vào cookie
-    res.cookie("refreshToken", refreshToken, {
+    res.cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
@@ -59,7 +62,7 @@ const getCurrent = asyncHandler(async (req, res) => {
     "-refreshToken -password -role"
   );
   return res.status(200).json({
-    success: false,
+    success: user ? true : false,
     rs: user ? user : "User not found",
   });
 });
@@ -90,8 +93,7 @@ const logout = asyncHandler(async (req, res) => {
   await User.findOneAndUpdate(
     { refreshToken: cookie.refreshToken },
     { refreshToken: "" },
-    { new: true },
-    { useFindAndModify: false }
+    { new: true }
   );
   // Xóa ở cookie
   res.clearCookie("refreshToken", {
@@ -103,10 +105,53 @@ const logout = asyncHandler(async (req, res) => {
     mes: "Logout is done",
   });
 });
+const getUsers = asyncHandler(async (req, res) => {
+  const response = await User.find().select("-refreshToken -role");
+  return res.status(200).json({
+    sucess: response ? true : false,
+    users: response,
+  });
+});
+const deleteUser = asyncHandler(async (req, res) => {
+  const { _id } = req.query;
+  if (!_id) throw new Error("Missing id");
+  const response = await User.findByIdAndDelete(_id);
+  return res.status(200).json({
+    sucess: response ? true : false,
+    deletedUser: response ? "User has been deleted" : "No user been deleted",
+  });
+});
+const updateUser = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  if (!_id || Object.keys(req.body).length === 0)
+    throw new Error("Missing input");
+  const response = await User.findByIdAndUpdate(_id, req.body, {
+    new: true,
+  }).select("-password -role -refreshToken");
+  return res.status(200).json({
+    sucess: response ? true : false,
+    updated: response ? response : "Something wrong",
+  });
+});
+const updateUserByAdmin = asyncHandler(async (req, res) => {
+  const { uid } = req.params;
+  if (Object.keys(req.body).length === 0) throw new Error("Missing input");
+  const response = await User.findByIdAndUpdate(uid, req.body, {
+    new: true,
+  }).select("-password -role -refreshToken");
+  return res.status(200).json({
+    sucess: response ? true : false,
+    updated: response ? response : "Something wrong",
+  });
+});
 module.exports = {
   register,
   login,
   getCurrent,
   refreshAccessToken,
   logout,
+  getUsers,
+  deleteUser,
+  updateUser,
+  updateUserByAdmin,
 };

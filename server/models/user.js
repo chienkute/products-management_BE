@@ -58,7 +58,7 @@ var userSchema = new mongoose.Schema(
 );
 userSchema.pre("save", async function (next) {
   //Check change password
-  if (this.isModified("password")) {
+  if (!this.isModified("password")) {
     next();
   }
   const salt = bcrypt.genSaltSync(10);
