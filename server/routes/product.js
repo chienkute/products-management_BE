@@ -12,7 +12,7 @@ router.put("/:pid", [verifyAccessToken, isAdmin], ctrls.updateProduct);
 router.put(
   "/uploadimage/:pid",
   [verifyAccessToken, isAdmin],
-  uploader.single("images"),
+  uploader.array("images", 10),
   ctrls.uploadImagesProduct
 );
 router.get("/:pid", ctrls.getProduct);

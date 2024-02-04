@@ -144,6 +144,53 @@ const updateUserByAdmin = asyncHandler(async (req, res) => {
     updated: response ? response : "Something wrong",
   });
 });
+const updateCart = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  const { pid, quantity, color } = req.body;
+  if (!pid || !quantity) throw new Error("Missing");
+  const user = await User.findById(_id).select("cart");
+  const alreadyProduct = user?.cart?.find(
+    (el) => el.product.toString() === pid
+  );
+  if (alreadyProduct) {
+    if (alreadyProduct.color === color) {
+      const response = await User.updateOne(
+        {
+          cart: { $elemMatch: alreadyProduct },
+        },
+        { $set: { "cart.$.quantity": quantity } }
+      );
+      return res.status(200).json({
+        sucess: response ? true : false,
+        updated: response ? response : "Something wrong",
+      });
+    } else {
+      const response = await User.findByIdAndUpdate(
+        _id,
+        {
+          $push: { cart: { product: pid, quantity, color } },
+        },
+        { new: true }
+      );
+      return res.status(200).json({
+        sucess: response ? true : false,
+        updated: response ? response : "Something wrong",
+      });
+    }
+  } else {
+    const response = await User.findByIdAndUpdate(
+      _id,
+      {
+        $push: { cart: { product: pid, quantity, color } },
+      },
+      { new: true }
+    );
+    return res.status(200).json({
+      sucess: response ? true : false,
+      updated: response ? response : "Something wrong",
+    });
+  }
+});
 module.exports = {
   register,
   login,
@@ -154,4 +201,5 @@ module.exports = {
   deleteUser,
   updateUser,
   updateUserByAdmin,
+  updateCart,
 };
