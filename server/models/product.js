@@ -37,6 +37,9 @@ var productSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    thumb: {
+      type: String,
+    },
     image: {
       type: Array,
     },
@@ -49,6 +52,7 @@ var productSchema = new mongoose.Schema(
         star: { type: Number },
         postedBy: { type: mongoose.Types.ObjectId, ref: "User" },
         comment: { type: String },
+        updatedAt: { updatedAt },
       },
     ],
     totalRatings: {

@@ -16,6 +16,9 @@ var userSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    avatar: {
+      type: String,
+    },
     mobile: {
       type: String,
       required: true,
@@ -36,10 +39,7 @@ var userSchema = new mongoose.Schema(
         color: String,
       },
     ],
-    address: {
-      type: Array,
-      default: [],
-    },
+    address: String,
     wishlist: [{ type: mongoose.Types.ObjectId, ref: "Product" }],
     isBlocked: {
       type: Boolean,

@@ -58,9 +58,15 @@ const login = asyncHandler(async (req, res) => {
 });
 const getCurrent = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const user = await User.findById({ _id }).select(
-    "-refreshToken -password -role"
-  );
+  const user = await User.findById(_id)
+    .select("-refreshToken -password -role")
+    .populate({
+      path: "cart",
+      populate: {
+        path: "product",
+        select: "title thumb price",
+      },
+    });
   return res.status(200).json({
     success: user ? true : false,
     rs: user ? user : "User not found",
@@ -106,10 +112,70 @@ const logout = asyncHandler(async (req, res) => {
   });
 });
 const getUsers = asyncHandler(async (req, res) => {
-  const response = await User.find().select("-refreshToken -role");
-  return res.status(200).json({
-    sucess: response ? true : false,
-    users: response,
+  const queries = { ...req.query };
+  //Tách các trường db ra khỏi query
+  const excludeFields = ["limit", "sort", "page", "fields"];
+  excludeFields.forEach((el) => delete queries[el]);
+
+  // Format lại các operators cho đúng cú pháp mongoose
+  let queryString = JSON.stringify(queries);
+  queryString = queryString.replace(
+    /\b(gte|gt|lt|lte)\b/g,
+    (matchedEl) => `$${matchedEl}`
+  );
+  const formatedQueries = JSON.parse(queryString);
+
+  // Filtering
+  if (queries?.name)
+    formatedQueries.name = { $regex: queries.name, $options: "i" };
+  // const query = {};
+  // if (req.query.q) {
+  //   query = {
+  //     $or: [
+  //       { name: { $regex: req.query.q, $options: "i" } },
+  //       { email: { $regex: req.query.q, $options: "i" } },
+  //     ],
+  //   };
+  // }
+  if (req.query.q) {
+    delete formatedQueries.q;
+    formatedQueries["$or"] = [
+      { firstname: { $regex: queries.q, $options: "i" } },
+      { lastname: { $regex: queries.q, $options: "i" } },
+      { email: { $regex: queries.q, $options: "i" } },
+    ];
+  }
+  let queryCommand = User.find(q);
+
+  //Sorting
+  if (req.query.sort) {
+    const sortBy = req.query.sort.split(",").join(" ");
+    queryCommand = queryCommand.sort(sortBy);
+  }
+
+  // Fields limiting
+  if (req.query.fields) {
+    const fields = req.query.fields.split(",").join(" ");
+    queryCommand = queryCommand.select(fields);
+  }
+  // Pagination
+  // limit : số object lấy về 1 lần gọi API
+  // skip
+  const page = +req.query.page || 1;
+  const limit = +req.query.limit || process.env.LIMIT_PRODUCTS;
+  const skip = (page - 1) * limit;
+  queryCommand.skip(skip).limit(limit);
+  // Execute query
+  // Số lượng sp thỏa mãn đk !== số lượng sp trả về 1 lần gọi API
+  queryCommand.exec(async (err, response) => {
+    if (err) throw new Error(err.message);
+    // Số lượng thỏa mãn đk
+    const counts = await Product.find(q).countDocuments();
+    return res.status(200).json({
+      sucess: response ? true : false,
+      counts,
+      data: response ? response : "Cannot get",
+    });
   });
 });
 const deleteUser = asyncHandler(async (req, res) => {
@@ -123,9 +189,12 @@ const deleteUser = asyncHandler(async (req, res) => {
 });
 const updateUser = asyncHandler(async (req, res) => {
   const { _id } = req.user;
+  const { firstname, lastname, email, mobile } = req.body;
+  const data = { firstname, lastname, email, mobile };
+  if (req.file) data.avatar = req.file.path;
   if (!_id || Object.keys(req.body).length === 0)
     throw new Error("Missing input");
-  const response = await User.findByIdAndUpdate(_id, req.body, {
+  const response = await User.findByIdAndUpdate(_id, data, {
     new: true,
   }).select("-password -role -refreshToken");
   return res.status(200).json({
@@ -146,42 +215,28 @@ const updateUserByAdmin = asyncHandler(async (req, res) => {
 });
 const updateCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const { pid, quantity, color } = req.body;
+  const { pid, quantity = 1, color, price } = req.body;
   if (!pid || !quantity) throw new Error("Missing");
   const user = await User.findById(_id).select("cart");
   const alreadyProduct = user?.cart?.find(
-    (el) => el.product.toString() === pid
+    (el) => el.product.toString() === pid && el.color === color
   );
   if (alreadyProduct) {
-    if (alreadyProduct.color === color) {
-      const response = await User.updateOne(
-        {
-          cart: { $elemMatch: alreadyProduct },
-        },
-        { $set: { "cart.$.quantity": quantity } }
-      );
-      return res.status(200).json({
-        sucess: response ? true : false,
-        updated: response ? response : "Something wrong",
-      });
-    } else {
-      const response = await User.findByIdAndUpdate(
-        _id,
-        {
-          $push: { cart: { product: pid, quantity, color } },
-        },
-        { new: true }
-      );
-      return res.status(200).json({
-        sucess: response ? true : false,
-        updated: response ? response : "Something wrong",
-      });
-    }
+    const response = await User.updateOne(
+      {
+        cart: { $elemMatch: alreadyProduct },
+      },
+      { $set: { "cart.$.quantity": quantity, "cart.$.price": price } }
+    );
+    return res.status(200).json({
+      sucess: response ? true : false,
+      updated: response ? response : "Something wrong",
+    });
   } else {
     const response = await User.findByIdAndUpdate(
       _id,
       {
-        $push: { cart: { product: pid, quantity, color } },
+        $push: { cart: { product: pid, quantity, color, price } },
       },
       { new: true }
     );
@@ -190,6 +245,31 @@ const updateCart = asyncHandler(async (req, res) => {
       updated: response ? response : "Something wrong",
     });
   }
+});
+const removeProduct = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  const { pid, color } = req.params;
+  const user = await User.findById(_id).select("cart");
+  const alreadyProduct = user?.cart?.find(
+    (el) => el.product.toString() === pid && el.color === color
+  );
+  if (!alreadyProduct) {
+    return res.status(200).json({
+      sucess: true,
+      updated: "update your cart",
+    });
+  }
+  const response = await User.findByIdAndUpdate(
+    _id,
+    {
+      $pull: { cart: { product: pid, color } },
+    },
+    { new: true }
+  );
+  return res.status(200).json({
+    sucess: response ? true : false,
+    updated: response ? response : "Something wrong",
+  });
 });
 module.exports = {
   register,
@@ -202,4 +282,5 @@ module.exports = {
   updateUser,
   updateUserByAdmin,
   updateCart,
+  removeProduct,
 };
